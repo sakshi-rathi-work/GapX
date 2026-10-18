@@ -81,72 +81,80 @@ Simulating execution against the recorded order book depth and fee-adjusted spre
 
 ```mermaid
 flowchart TD
-    subgraph MarketData [Live Exchange WebSocket Feeds]
-        B_WS["Binance WS Stream<br/>(@depth20@100ms)"]
-        C_WS["Coinbase WS Feed<br/>(level2_batch)"]
-        K_WS["Kraken WS Feed<br/>(book depth 10)"]
+    subgraph Feeds ["Live Exchange WebSocket Feeds"]
+        B_WS["Binance WS (depth20 at 100ms)"]
+        C_WS["Coinbase WS (level2_batch)"]
+        K_WS["Kraken WS (book depth 10)"]
     end
 
-    subgraph IngestionLayer [Ingestion Layer (asyncio Tasks)]
-        B_Client["BinanceWSClient<br/>(Normalized Event Parser)"]
-        C_Client["CoinbaseWSClient<br/>(L2 Delta Book Builder)"]
-        K_Client["KrakenWSClient<br/>(L2 Snapshot & Delta Sync)"]
-        Backoff["Supervision Loop<br/>(Exponential Backoff & Pings)"]
+    subgraph Ingestion ["Ingestion Layer (asyncio Tasks)"]
+        B_Client["BinanceWSClient (Normalized Events)"]
+        C_Client["CoinbaseWSClient (L2 Book Builder)"]
+        K_Client["KrakenWSClient (Snapshot and Deltas)"]
+        Backoff["Supervision Loop (Backoff and Pings)"]
     end
 
-    subgraph MemoryStore [Shared State Layer]
-        StateStore["StateStore (In-Memory)<br/>asyncio.Lock guarded<br/>OrderBookSnapshot per Exchange/Symbol"]
+    subgraph SharedState ["Shared State Layer"]
+        StateStore["StateStore (In-Memory asyncio.Lock)"]
     end
 
-    subgraph Detection [Detection Engine (300ms Loop)]
-        Pairwise["Pairwise Exchange Permutations<br/>(Binance ⇄ Coinbase ⇄ Kraken)"]
-        DepthWalk["Order Book Depth Walk<br/>(Slippage at $500 Notional)"]
-        FeeCalc["Taker Fee Adjustment<br/>(0.10% / 0.60% / 0.26%)"]
-        LatencyFilter["Data Staleness & Latency Guard<br/>(Age ≤ 2000ms)"]
-        ActionableCheck{"Net Spread ≥ 0.20% &<br/>Fully Fillable & Fresh?"}
+    subgraph DetectionEngine ["Detection Engine (300ms Loop)"]
+        Pairwise["Pairwise Comparison across Exchanges"]
+        DepthWalk["Order Book Depth Walk (Slippage at $500)"]
+        FeeCalc["Taker Fee Adjustment (0.10% / 0.60% / 0.26%)"]
+        LatencyFilter["Data Staleness Guard (Max Age: 2000ms)"]
+        ActionableCheck{"Net Spread >= 0.20% and Fillable?"}
     end
 
-    subgraph Persistence [Storage Layer]
-        SQLite[("gapx.db (SQLite via aiosqlite)<br/>opportunities table with indexes")]
+    subgraph Storage ["Storage Layer"]
+        SQLite[("gapx.db (SQLite via aiosqlite)")]
     end
 
-    subgraph APILayer [FastAPI Backend Service (:8000)]
-        REST["REST Endpoints<br/>/prices/live, /orderbook/live<br/>/opportunities, /analytics/*"]
-        WS_Gateway["WebSocket Gateway<br/>/ws/live (Broadcast Manager)"]
+    subgraph API ["FastAPI Backend Service (:8000)"]
+        REST["REST Endpoints (/prices, /orderbook, /analytics)"]
+        WS_Gateway["WebSocket Gateway (/ws/live Broadcast)"]
     end
 
-    subgraph FrontendApp [React 19 Dashboard (:5173)]
-        TickerUI["PriceTickerGrid<br/>(Live Bids/Asks)"]
-        FeedUI["OpportunityFeed<br/>(Actionable vs Pass)"]
-        ChartUI["SpreadChart<br/>(Chart.js Time Series)"]
-        ModalUI["OrderBookModal<br/>(L2 Depth Inspection)"]
-        StatsUI["AnalyticsSummary<br/>(24h KPIs)"]
+    subgraph Dashboard ["React 19 Dashboard (:5173)"]
+        TickerUI["PriceTickerGrid (Live Tickers)"]
+        FeedUI["OpportunityFeed (Actionable vs Pass)"]
+        ChartUI["SpreadChart (Spread History)"]
+        ModalUI["OrderBookModal (L2 Depth Viewer)"]
+        StatsUI["AnalyticsSummary (24h KPIs)"]
     end
 
-    %% Connections
     B_WS --> B_Client
     C_WS --> C_Client
     K_WS --> K_Client
-    Backoff -.-> B_Client & C_Client & K_Client
 
-    B_Client & C_Client & K_Client -->|OrderBookSnapshot| StateStore
+    Backoff -.-> B_Client
+    Backoff -.-> C_Client
+    Backoff -.-> K_Client
 
-    StateStore -->|Scan latest snapshots| Pairwise
+    B_Client --> StateStore
+    C_Client --> StateStore
+    K_Client --> StateStore
+
+    StateStore --> Pairwise
     Pairwise --> DepthWalk
     DepthWalk --> FeeCalc
     FeeCalc --> LatencyFilter
     LatencyFilter --> ActionableCheck
 
-    ActionableCheck -->|ArbitrageOpportunity Event| SQLite
-    ActionableCheck -->|Real-time Broadcast| WS_Gateway
+    ActionableCheck -->|Log to DB| SQLite
+    ActionableCheck -->|Broadcast Event| WS_Gateway
 
-    SQLite -->|Historical & Analytics Queries| REST
-    StateStore -->|Live Book & Prices| REST
+    SQLite --> REST
+    StateStore --> REST
 
-    REST -->|Initial REST Polling| FrontendApp
-    WS_Gateway -->|Live WS Ticker & Opps Push| FrontendApp
+    REST --> Dashboard
+    WS_Gateway --> Dashboard
 
-    FrontendApp --> TickerUI & FeedUI & ChartUI & ModalUI & StatsUI
+    Dashboard --> TickerUI
+    Dashboard --> FeedUI
+    Dashboard --> ChartUI
+    Dashboard --> ModalUI
+    Dashboard --> StatsUI
 ```
 
 ---
