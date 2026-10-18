@@ -22,3 +22,4 @@ Thumbs.db
 *.sqlite3
 
 *.md
+!README.md
